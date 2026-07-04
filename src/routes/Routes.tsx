@@ -5,10 +5,12 @@ import { BrowsePage } from '../pages/BrowsePage';
 import { LibraryPage } from '../pages/LibraryPage';
 import { PublishPage } from '../pages/PublishPage';
 import { UserPage } from '../pages/UserPage';
+import { useIframe } from '../hooks/useIframeListener';
 
 function Layout() {
   const navigate = useNavigate();
   const applied  = useRef(false);
+  useIframe();
 
   useEffect(() => {
     if (applied.current) return;
