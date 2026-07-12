@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useAtom, useAtomValue } from 'jotai';
 import { Box, Chip, IconButton, Tooltip, Typography } from '@mui/material';
 import LocalLibraryIcon from '@mui/icons-material/LocalLibrary';
@@ -10,7 +10,7 @@ import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useColors } from '../../theme/ColorTokensContext';
 import { tokens } from '../../theme/tokens';
-import { themeAtom, accountAtom } from '../../state/atoms';
+import { themeAtom, accountAtom, uiStyleAtom } from '../../state/atoms';
 import { EnumTheme } from '../../types';
 import { RatingControl } from './RatingControl';
 
@@ -20,10 +20,35 @@ export function TopBar() {
   const c = useColors();
   const [theme, setTheme] = useAtom(themeAtom);
   const account   = useAtomValue(accountAtom);
+  const uiStyle   = useAtomValue(uiStyleAtom);
   const navigate  = useNavigate();
   const location  = useLocation();
+  const headerRef = useRef<HTMLElement | null>(null);
   const [isFollowed, setIsFollowed] = useState(false);
   const [followBusy, setFollowBusy] = useState(false);
+  const isClassic = uiStyle === 'classic';
+
+  useLayoutEffect(() => {
+    const header = headerRef.current;
+    if (!header) return;
+
+    const updateHeight = () => {
+      document.documentElement.style.setProperty(
+        '--library-top-bar-height',
+        `${header.getBoundingClientRect().height}px`,
+      );
+    };
+
+    updateHeight();
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', updateHeight);
+      return () => window.removeEventListener('resize', updateHeight);
+    }
+
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(header);
+    return () => observer.disconnect();
+  }, [isClassic]);
 
   useEffect(() => {
     qdnRequest({ action: 'GET_LIST', listName: 'followedNames' })
@@ -50,6 +75,27 @@ export function TopBar() {
     void qdnRequest({ action: 'OPEN_NEW_TAB', address: `qdn://APP/Help/Help?new=${APP_QDN_NAME}` });
   }
 
+  function handleToggleTheme() {
+    setTheme(current => {
+      const next = current === EnumTheme.DARK ? EnumTheme.LIGHT : EnumTheme.DARK;
+      document.documentElement.dataset.theme = next;
+      document.documentElement.style.colorScheme = next;
+      return next;
+    });
+  }
+
+  const buttonSx = {
+    borderRadius: `${isClassic ? tokens.shape.radiusMd : tokens.shape.radius}px`,
+    minWidth: 44,
+    minHeight: 44,
+    width: 44,
+    height: 44,
+    p: 0,
+    color: c.textSecondary,
+    '&:hover': { color: c.accent, bgcolor: isClassic ? c.controlHover : c.borderLight },
+    transition: c.transitionControl,
+  };
+
   const isBrowse  = location.pathname === '/' || location.pathname.startsWith('/user/');
   const isPublish = location.pathname === '/publish';
   const isLibrary = location.pathname === '/library';
@@ -72,13 +118,18 @@ export function TopBar() {
   return (
     <Box
       component="header"
+      ref={headerRef}
       sx={{
         position: 'fixed', top: 0, left: 0, right: 0,
-        height: tokens.spacing.topBarHeight,
+        height: isClassic ? 'auto' : tokens.spacing.topBarHeight,
+        minHeight: isClassic ? 'auto' : tokens.spacing.topBarHeight,
         bgcolor: c.surface,
-        borderBottom: `${tokens.shape.borderWidth} solid ${c.borderLight}`,
-        display: 'flex', alignItems: 'center',
-        px: 2, gap: 1, zIndex: 100,
+        borderBottom: `${isClassic ? tokens.shape.classicBorderWidth : tokens.shape.borderWidth} solid ${isClassic ? c.border : c.borderLight}`,
+        boxShadow: isClassic ? c.topBarShadow : 'none',
+        display: 'flex', alignItems: 'center', flexWrap: 'wrap',
+        px: isClassic ? { xs: 1.25, sm: 1.75 } : 2,
+        py: isClassic ? 1 : 0,
+        gap: 1, zIndex: 100,
       }}
     >
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mr: 'auto' }}>
@@ -136,15 +187,9 @@ export function TopBar() {
           size="small"
           onClick={() => void handleToggleFollow()}
           disabled={followBusy}
-          sx={{
-            borderRadius: `${tokens.shape.radius}px`,
-            minWidth: 36, minHeight: 36,
-            color: isFollowed ? c.accent : c.textSecondary,
-            '&:hover': { color: c.accent, bgcolor: c.borderLight },
-            transition: '0.15s ease',
-          }}
+          sx={{ ...buttonSx, color: isFollowed ? c.accent : c.textSecondary }}
         >
-          {isFollowed ? <PersonRemoveAlt1Icon sx={{ fontSize: '1rem' }} /> : <PersonAddAlt1Icon sx={{ fontSize: '1rem' }} />}
+          {isFollowed ? <PersonRemoveAlt1Icon fontSize="small" /> : <PersonAddAlt1Icon fontSize="small" />}
         </IconButton>
       </Tooltip>
 
@@ -152,32 +197,20 @@ export function TopBar() {
         <IconButton
           size="small"
           onClick={handleOpenHelp}
-          sx={{
-            borderRadius: `${tokens.shape.radius}px`,
-            minWidth: 36, minHeight: 36,
-            color: c.textSecondary,
-            '&:hover': { color: c.accent, bgcolor: c.borderLight },
-            transition: '0.15s ease',
-          }}
+          sx={buttonSx}
         >
-          <HelpOutlineIcon sx={{ fontSize: '1rem' }} />
+          <HelpOutlineIcon fontSize="small" />
         </IconButton>
       </Tooltip>
 
       <Tooltip title={theme === EnumTheme.DARK ? 'Light mode' : 'Dark mode'} placement="bottom">
         <IconButton
-          onClick={() => setTheme(t => t === EnumTheme.DARK ? EnumTheme.LIGHT : EnumTheme.DARK)}
-          sx={{
-            borderRadius: `${tokens.shape.radius}px`,
-            minWidth: 36, minHeight: 36,
-            color: c.textSecondary,
-            '&:hover': { color: c.accent, bgcolor: c.borderLight },
-            transition: '0.15s ease',
-          }}
+          onClick={handleToggleTheme}
+          sx={buttonSx}
         >
           {theme === EnumTheme.DARK
-            ? <LightModeIcon sx={{ fontSize: '1rem' }} />
-            : <DarkModeIcon  sx={{ fontSize: '1rem' }} />}
+            ? <LightModeIcon fontSize="small" />
+            : <DarkModeIcon  fontSize="small" />}
         </IconButton>
       </Tooltip>
     </Box>

@@ -56,7 +56,7 @@ export function UserPage() {
   }, [decodedName]);
 
   return (
-    <Box sx={{ pt: `${tokens.spacing.topBarHeight + 28}px`, pb: 6, px: { xs: 2, md: 3 } }}>
+    <Box sx={{ pt: `calc(var(--library-top-bar-height, ${tokens.spacing.topBarHeight}px) + 28px)`, pb: 6, px: { xs: 2, md: 3 } }}>
 
       {/* Back + header */}
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 3 }}>

@@ -154,7 +154,7 @@ export function PublishPage() {
   const noName       = account !== null && !account.name;
 
   return (
-    <Box sx={{ pt: `${tokens.spacing.topBarHeight + 28}px`, pb: 6, px: { xs: 2, md: 3 }, maxWidth: 760, mx: 'auto' }}>
+    <Box sx={{ pt: `calc(var(--library-top-bar-height, ${tokens.spacing.topBarHeight}px) + 28px)`, pb: 6, px: { xs: 2, md: 3 }, maxWidth: 760, mx: 'auto' }}>
 
       <Box sx={{ mb: 3 }}>
         <Typography sx={{

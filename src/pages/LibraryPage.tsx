@@ -25,7 +25,7 @@ export function LibraryPage() {
   const noName = account !== null && !account.name;
 
   return (
-    <Box sx={{ pt: `${tokens.spacing.topBarHeight + 28}px`, pb: 6, px: { xs: 2, md: 3 } }}>
+    <Box sx={{ pt: `calc(var(--library-top-bar-height, ${tokens.spacing.topBarHeight}px) + 28px)`, pb: 6, px: { xs: 2, md: 3 } }}>
 
       <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', mb: 3, flexWrap: 'wrap', gap: 1 }}>
         <Box>

@@ -115,7 +115,7 @@ export function BrowsePage() {
   });
 
   return (
-    <Box sx={{ pt: `${tokens.spacing.topBarHeight + 28}px`, pb: 6, px: { xs: 2, md: 3 } }}>
+    <Box sx={{ pt: `calc(var(--library-top-bar-height, ${tokens.spacing.topBarHeight}px) + 28px)`, pb: 6, px: { xs: 2, md: 3 } }}>
 
       {/* Header */}
       <Box sx={{ mb: 3, maxWidth: 560 }}>
