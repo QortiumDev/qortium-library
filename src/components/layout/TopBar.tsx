@@ -15,6 +15,7 @@ import { EnumTheme } from '../../types';
 import { RatingControl } from './RatingControl';
 
 const APP_QDN_NAME = 'Library';
+const APP_QDN_IDENTIFIER = 'Library';
 
 export function TopBar() {
   const c = useColors();
@@ -180,7 +181,7 @@ export function TopBar() {
         </Typography>
       )}
 
-      <RatingControl qdnName={APP_QDN_NAME} />
+      <RatingControl qdnName={APP_QDN_NAME} identifier={APP_QDN_IDENTIFIER} />
 
       <Tooltip title={isFollowed ? 'Stop following this app' : 'Follow this app'} placement="bottom">
         <IconButton
