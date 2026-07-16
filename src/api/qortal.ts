@@ -14,7 +14,12 @@ export async function searchResources(opts: {
   try {
     const res = await qdnRequest({
       action: 'SEARCH_QDN_RESOURCES',
-      mode: 'LATEST',
+      // 'LATEST' collapses results to one row per (name, service) pair on the
+      // node side, discarding every other identifier a publisher has under that
+      // service - so an account with several books would show only its newest.
+      // 'ALL' returns one row per distinct (name, service, identifier), i.e.
+      // one row per book, which is what a document library needs.
+      mode: 'ALL',
       includeMetadata: true,
       limit:  opts.limit  ?? 20,
       offset: opts.offset ?? 0,
@@ -137,6 +142,7 @@ export async function openDocumentViewer(
   name: string,
   identifier: string | null,
   path?: string | null,
+  filename?: string | null,
 ): Promise<boolean> {
   return await qdnRequest({
     action: 'OPEN_QDN_DOCUMENT_VIEWER',
@@ -144,6 +150,11 @@ export async function openDocumentViewer(
     name,
     identifier: identifier ?? null,
     path: path ?? null,
+    // Format hint for Home's document viewer - single-file resources have no
+    // path, so without this epub/pdf/cbz detection falls back to the node's
+    // unreliable Content-Type header. Ignored by Home builds that predate
+    // QortiumDev/qortium-home#142.
+    filename: filename ?? null,
   }) as boolean;
 }
 

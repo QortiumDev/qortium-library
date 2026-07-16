@@ -47,7 +47,7 @@ export function BookCard({ resource }: { resource: QdnResource }) {
     e.stopPropagation();
     setOpening(true);
     try {
-      await openDocumentViewer(resource.service, resource.name, resource.identifier);
+      await openDocumentViewer(resource.service, resource.name, resource.identifier, null, resource.identifier);
     } catch { /* Home not available outside Qortium */ }
     finally { setOpening(false); }
   }
