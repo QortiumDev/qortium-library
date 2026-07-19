@@ -4,15 +4,42 @@ import {
   InputAdornment, TextField, Typography,
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
+import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
+import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import LocalLibraryIcon from '@mui/icons-material/LocalLibrary';
 import { useColors } from '../theme/ColorTokensContext';
 import { tokens } from '../theme/tokens';
-import { type QdnResource, type FileType, getFileType } from '../types';
+import { type QdnResource, type FileType, getResourceFileType } from '../types';
 import { searchResources } from '../api/qortal';
 import { BookGrid } from '../components/books/BookGrid';
 import { EmptyState } from '../components/shared/EmptyState';
 
-const PAGE_SIZE = 40;
+// Default number of books shown on first load / new search.
+const INITIAL_LOAD = 40;
+// Books shown per pagination group, and the number of further books fetched
+// once the user pages past what's already loaded.
+const GROUP_SIZE = 40;
+// The DOCUMENT service is shared with other apps (forum posts, notifications,
+// votes, etc.) that vastly outnumber actual book publishes, so a raw fetch of
+// GROUP_SIZE resources yields far fewer than GROUP_SIZE actual books. Sift
+// through raw batches this large at a time until enough books are found.
+const RAW_BATCH = 200;
+// Safety cap on how many raw resources a single load will scan through
+// looking for books, so a page with very few real books doesn't spin forever.
+const MAX_RAW_SCAN = 3000;
+
+function getPageWindow(current: number, total: number): (number | 'ellipsis')[] {
+  const keep = new Set<number>([0, total - 1, current]);
+  if (current - 1 >= 0) keep.add(current - 1);
+  if (current + 1 <= total - 1) keep.add(current + 1);
+  const sorted = Array.from(keep).filter(n => n >= 0 && n < total).sort((a, b) => a - b);
+  const out: (number | 'ellipsis')[] = [];
+  sorted.forEach((n, i) => {
+    if (i > 0 && n - sorted[i - 1] > 1) out.push('ellipsis');
+    out.push(n);
+  });
+  return out;
+}
 
 type TypeFilter = 'all' | FileType;
 
@@ -30,8 +57,7 @@ const SORT_CHIPS: { value: 'newest' | 'oldest'; label: string }[] = [
 ];
 
 function isReadable(r: QdnResource): boolean {
-  const t = getFileType(r.identifier);
-  return t !== 'unknown';
+  return getResourceFileType(r) !== 'unknown';
 }
 
 export function BrowsePage() {
@@ -46,57 +72,85 @@ export function BrowsePage() {
   const [loadingMore,  setLoadingMore]  = useState(false);
   const [hasMore,      setHasMore]      = useState(false);
   const [offset,       setOffset]       = useState(0);
+  const [page,         setPage]         = useState(0);
   const didInit = useRef(false);
 
   const displayResults = typeFilter === 'all'
     ? allResults
-    : allResults.filter(r => getFileType(r.identifier) === typeFilter);
+    : allResults.filter(r => getResourceFileType(r) === typeFilter);
 
   const sortedResults = sortMode === 'newest'
     ? displayResults
     : [...displayResults].reverse();
 
-  const doSearch = useCallback(async (query: string, replace: boolean, currentOffset: number) => {
+  const totalPages = Math.max(1, Math.ceil(sortedResults.length / GROUP_SIZE));
+  const pageResults = sortedResults.slice(page * GROUP_SIZE, page * GROUP_SIZE + GROUP_SIZE);
+  const canGoNext = page < totalPages - 1 || hasMore;
+
+  const doSearch = useCallback(async (query: string, replace: boolean, startOffset: number, target: number) => {
     if (replace) setLoading(true); else setLoadingMore(true);
 
-    const res = await searchResources({
-      service: 'DOCUMENT',
-      query:   query || undefined,
-      limit:   PAGE_SIZE,
-      offset:  currentOffset,
-    });
+    let rawOffset = startOffset;
+    let scanned = 0;
+    let exhausted = false;
+    const collected: QdnResource[] = [];
 
-    const readable = res.filter(isReadable);
+    while (collected.length < target && scanned < MAX_RAW_SCAN) {
+      const res = await searchResources({
+        service: 'DOCUMENT',
+        query:   query || undefined,
+        limit:   RAW_BATCH,
+        offset:  rawOffset,
+      });
+      rawOffset += res.length;
+      scanned += res.length;
+      collected.push(...res.filter(isReadable));
+      if (res.length < RAW_BATCH) { exhausted = true; break; }
+    }
 
     if (replace) {
-      setAllResults(readable);
-      setOffset(res.length);
+      setAllResults(collected);
     } else {
       setAllResults(prev => {
         const seen = new Set(prev.map(r => `${r.service}::${r.name}::${r.identifier}`));
-        const fresh = readable.filter(r => !seen.has(`${r.service}::${r.name}::${r.identifier}`));
+        const fresh = collected.filter(r => !seen.has(`${r.service}::${r.name}::${r.identifier}`));
         return [...prev, ...fresh];
       });
-      setOffset(o => o + res.length);
     }
-    setHasMore(res.length === PAGE_SIZE);
+    setOffset(rawOffset);
+    setHasMore(!exhausted);
     if (replace) setLoading(false); else setLoadingMore(false);
   }, []);
 
   useEffect(() => {
     if (didInit.current) return;
     didInit.current = true;
-    void doSearch('', true, 0);
+    void doSearch('', true, 0, INITIAL_LOAD);
   }, [doSearch]);
 
   function handleSearch() {
     setActiveQuery(queryInput);
     setOffset(0);
-    void doSearch(queryInput, true, 0);
+    setPage(0);
+    void doSearch(queryInput, true, 0, INITIAL_LOAD);
   }
 
-  function handleLoadMore() {
-    void doSearch(activeQuery, false, offset);
+  async function goToPage(target: number) {
+    if (target === page || target < 0) return;
+    if (target >= totalPages && hasMore) {
+      await doSearch(activeQuery, false, offset, GROUP_SIZE);
+    }
+    setPage(target);
+  }
+
+  function handleTypeFilter(value: TypeFilter) {
+    setTypeFilter(value);
+    setPage(0);
+  }
+
+  function handleSortMode(value: 'newest' | 'oldest') {
+    setSortMode(value);
+    setPage(0);
   }
 
   const chipSx = (active: boolean) => ({
@@ -111,6 +165,22 @@ export function BrowsePage() {
     color:   active ? c.accentText : c.textSecondary,
     border:  `1.5px solid ${active ? c.accent : c.borderLight}`,
     '&:hover': { bgcolor: active ? c.accentHover : c.borderLight },
+    transition: '0.12s ease',
+  });
+
+  const pageBtnSx = (active: boolean) => ({
+    minWidth: 32,
+    width: 32,
+    height: 32,
+    p: 0,
+    borderRadius: '50%',
+    fontSize: '0.72rem',
+    fontWeight: tokens.typography.weightBold,
+    bgcolor: active ? c.accent : 'transparent',
+    color:   active ? c.accentText : c.textSecondary,
+    border:  `1.5px solid ${active ? c.accent : c.borderLight}`,
+    '&:hover': { bgcolor: active ? c.accentHover : c.borderLight },
+    '&.Mui-disabled': { opacity: 0.35 },
     transition: '0.12s ease',
   });
 
@@ -184,7 +254,7 @@ export function BrowsePage() {
             key={value}
             label={label}
             size="small"
-            onClick={() => setTypeFilter(value)}
+            onClick={() => handleTypeFilter(value)}
             sx={chipSx(typeFilter === value)}
           />
         ))}
@@ -196,7 +266,7 @@ export function BrowsePage() {
             key={value}
             label={label}
             size="small"
-            onClick={() => setSortMode(value)}
+            onClick={() => handleSortMode(value)}
             sx={chipSx(sortMode === value)}
           />
         ))}
@@ -220,26 +290,45 @@ export function BrowsePage() {
           subtitle={activeQuery ? `No results for "${activeQuery}"` : 'Try searching for a title, author, or topic'}
         />
       ) : (
-        <BookGrid resources={sortedResults} />
+        <BookGrid resources={pageResults} />
       )}
 
-      {/* Load more */}
-      {!loading && hasMore && (
-        <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
+      {/* Pagination */}
+      {!loading && sortedResults.length > 0 && (totalPages > 1 || hasMore) && (
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5, mt: 4 }}>
           <Button
-            variant="outlined"
-            onClick={handleLoadMore}
-            disabled={loadingMore}
-            sx={{
-              borderColor: c.accent, color: c.accent,
-              borderRadius: '50px', fontSize: '0.72rem', px: 3,
-              '&:hover': { bgcolor: c.borderLight },
-              '&.Mui-disabled': { opacity: 0.35 },
-            }}
+            onClick={() => void goToPage(page - 1)}
+            disabled={page === 0 || loadingMore}
+            sx={pageBtnSx(false)}
+          >
+            <ChevronLeftIcon sx={{ fontSize: '1.1rem' }} />
+          </Button>
+
+          {getPageWindow(page, totalPages).map((p, i) =>
+            p === 'ellipsis' ? (
+              <Typography key={`e${i}`} sx={{ fontSize: '0.72rem', color: c.textSecondary, px: 0.5 }}>
+                &hellip;
+              </Typography>
+            ) : (
+              <Button
+                key={p}
+                onClick={() => void goToPage(p)}
+                disabled={loadingMore}
+                sx={pageBtnSx(p === page)}
+              >
+                {p + 1}
+              </Button>
+            )
+          )}
+
+          <Button
+            onClick={() => void goToPage(page + 1)}
+            disabled={!canGoNext || loadingMore}
+            sx={pageBtnSx(false)}
           >
             {loadingMore
-              ? <CircularProgress size={14} sx={{ color: c.accent }} />
-              : 'Load more'}
+              ? <CircularProgress size={12} sx={{ color: c.accent }} />
+              : <ChevronRightIcon sx={{ fontSize: '1.1rem' }} />}
           </Button>
         </Box>
       )}

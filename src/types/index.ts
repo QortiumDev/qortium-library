@@ -5,6 +5,14 @@ export enum EnumTheme {
 
 export type FileType = 'pdf' | 'epub' | 'txt' | 'cbz' | 'unknown';
 
+export interface QdnResourceMetadata {
+  title?: string;
+  description?: string;
+  tags?: string[];
+  category?: string;
+  mimeType?: string;
+}
+
 export interface QdnResource {
   service: string;
   name: string;
@@ -17,6 +25,7 @@ export interface QdnResource {
   category?: string;
   created?: number;
   updated?: number;
+  metadata?: QdnResourceMetadata;
 }
 
 export interface BookmarkEntry {
@@ -44,6 +53,36 @@ export function getFileType(identifier: string): FileType {
   if (ext === 'txt')  return 'txt';
   if (ext === 'cbz')  return 'cbz';
   return 'unknown';
+}
+
+function getFileTypeFromMime(mimeType: string): FileType {
+  if (mimeType === 'application/pdf') return 'pdf';
+  if (mimeType === 'application/epub+zip') return 'epub';
+  if (mimeType.startsWith('text/plain')) return 'txt';
+  if (mimeType === 'application/vnd.comicbook+zip' || mimeType === 'application/x-cbz') return 'cbz';
+  return 'unknown';
+}
+
+// `identifier` is a publisher-chosen string, not a filename - it's only
+// extension-shaped for books this app itself published. `metadata.mimeType`
+// is computed node-side from the actual file content, so it's reliable
+// regardless of what published the resource; identifier parsing is only a
+// fallback for older resources published without metadata.
+export function getResourceFileType(resource: QdnResource): FileType {
+  const mimeType = resource.metadata?.mimeType;
+  if (mimeType) {
+    const fromMime = getFileTypeFromMime(mimeType);
+    if (fromMime !== 'unknown') return fromMime;
+  }
+  return getFileType(resource.identifier);
+}
+
+export function getResourceTitle(resource: QdnResource): string {
+  return resource.metadata?.title || resource.title || resource.identifier;
+}
+
+export function getResourceDescription(resource: QdnResource): string | undefined {
+  return resource.metadata?.description || resource.description;
 }
 
 export function formatBytes(bytes: number | undefined): string {

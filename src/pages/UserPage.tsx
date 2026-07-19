@@ -5,15 +5,21 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import PersonIcon from '@mui/icons-material/Person';
 import { useColors } from '../theme/ColorTokensContext';
 import { tokens } from '../theme/tokens';
-import { type QdnResource, getFileType } from '../types';
+import { type QdnResource, getResourceFileType } from '../types';
 import { listResources } from '../api/qortal';
 import { BookGrid } from '../components/books/BookGrid';
 import { EmptyState } from '../components/shared/EmptyState';
 
 const PAGE_SIZE = 40;
+// The DOCUMENT service is shared with other apps (forum posts, notifications,
+// votes, etc.) that vastly outnumber actual book publishes, so a raw fetch of
+// PAGE_SIZE resources yields far fewer than PAGE_SIZE actual books. Sift
+// through raw batches this large at a time until enough books are found.
+const RAW_BATCH = 200;
+const MAX_RAW_SCAN = 3000;
 
 function isReadable(r: QdnResource): boolean {
-  return getFileType(r.identifier) !== 'unknown';
+  return getResourceFileType(r) !== 'unknown';
 }
 
 export function UserPage() {
@@ -30,21 +36,30 @@ export function UserPage() {
 
   const decodedName = name ? decodeURIComponent(name) : '';
 
-  async function load(replace: boolean, currentOffset: number) {
+  async function load(replace: boolean, startOffset: number) {
     if (!decodedName) return;
     if (replace) setLoading(true); else setLoadingMore(true);
 
-    const res = await listResources(decodedName, 'DOCUMENT', currentOffset, PAGE_SIZE);
-    const readable = res.filter(isReadable);
+    let rawOffset = startOffset;
+    let scanned = 0;
+    let exhausted = false;
+    const collected: QdnResource[] = [];
+
+    while (collected.length < PAGE_SIZE && scanned < MAX_RAW_SCAN) {
+      const res = await listResources(decodedName, 'DOCUMENT', rawOffset, RAW_BATCH);
+      rawOffset += res.length;
+      scanned += res.length;
+      collected.push(...res.filter(isReadable));
+      if (res.length < RAW_BATCH) { exhausted = true; break; }
+    }
 
     if (replace) {
-      setResources(readable);
-      setOffset(res.length);
+      setResources(collected);
     } else {
-      setResources(prev => [...prev, ...readable]);
-      setOffset(o => o + res.length);
+      setResources(prev => [...prev, ...collected]);
     }
-    setHasMore(res.length === PAGE_SIZE);
+    setOffset(rawOffset);
+    setHasMore(!exhausted);
     if (replace) setLoading(false); else setLoadingMore(false);
   }
 

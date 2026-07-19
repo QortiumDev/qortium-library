@@ -11,7 +11,7 @@ import DownloadIcon from '@mui/icons-material/Download';
 import { useNavigate } from 'react-router-dom';
 import { useColors } from '../../theme/ColorTokensContext';
 import { tokens } from '../../theme/tokens';
-import { type QdnResource, type FileType, getFileType, formatBytes } from '../../types';
+import { type QdnResource, type FileType, getResourceFileType, getResourceTitle, formatBytes } from '../../types';
 import { useBookmarks } from '../../hooks/useBookmarks';
 import { openDocumentViewer, saveQdnResource, ensureAccountUnlocked } from '../../api/qortal';
 import { TypeBadge, getTypeCoverGradient } from './TypeBadge';
@@ -37,9 +37,9 @@ export function BookCard({ resource }: { resource: QdnResource }) {
   const [downloading, setDownloading] = useState(false);
   const [bookmarking, setBookmarking] = useState(false);
 
-  const fileType     = getFileType(resource.identifier);
+  const fileType     = getResourceFileType(resource);
   const isBookmarked = has(resource.service, resource.name, resource.identifier);
-  const title        = resource.title || resource.identifier;
+  const title        = getResourceTitle(resource);
 
   const gradient = getTypeCoverGradient(fileType, c.accent, c.accentHover);
 
@@ -73,7 +73,7 @@ export function BookCard({ resource }: { resource: QdnResource }) {
           service:    resource.service,
           name:       resource.name,
           identifier: resource.identifier,
-          title:      resource.title,
+          title,
           filename:   resource.identifier,
         });
       }
