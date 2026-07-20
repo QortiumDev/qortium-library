@@ -8,6 +8,7 @@ export async function getUserAccount(): Promise<{ address: string; name: string 
 export async function searchResources(opts: {
   service?: string;
   query?: string;
+  keywords?: string[];
   limit?: number;
   offset?: number;
 }): Promise<QdnResource[]> {
@@ -24,8 +25,9 @@ export async function searchResources(opts: {
       limit:  opts.limit  ?? 20,
       offset: opts.offset ?? 0,
       reverse: true,
-      ...(opts.service ? { service: opts.service } : {}),
-      ...(opts.query   ? { query: opts.query }     : {}),
+      ...(opts.service  ? { service: opts.service }   : {}),
+      ...(opts.query    ? { query: opts.query }       : {}),
+      ...(opts.keywords ? { keywords: opts.keywords } : {}),
     }) as QdnResource[];
     return res ?? [];
   } catch { return []; }

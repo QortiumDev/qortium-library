@@ -131,6 +131,7 @@ export function PublishPage() {
           filename:    b.file.name,
           title:       b.title.trim() || undefined,
           description: b.description.trim() || undefined,
+          tags:        ['qlib-book'],
         }))
       );
 

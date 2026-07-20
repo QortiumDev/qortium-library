@@ -27,6 +27,10 @@ const RAW_BATCH = 200;
 // Safety cap on how many raw resources a single load will scan through
 // looking for books, so a page with very few real books doesn't spin forever.
 const MAX_RAW_SCAN = 3000;
+// Resources this app published carry this tag (see PublishPage), so a
+// keyword-scoped search returns almost entirely valid books without the
+// DOCUMENT-service noise - no raw-batch scanning needed for that portion.
+const BOOK_TAG = 'qlib-book';
 
 function getPageWindow(current: number, total: number): (number | 'ellipsis')[] {
   const keep = new Set<number>([0, total - 1, current]);
@@ -71,9 +75,12 @@ export function BrowsePage() {
   const [loading,      setLoading]      = useState(false);
   const [loadingMore,  setLoadingMore]  = useState(false);
   const [hasMore,      setHasMore]      = useState(false);
-  const [offset,       setOffset]       = useState(0);
   const [page,         setPage]         = useState(0);
   const didInit = useRef(false);
+  // Two independent pagination cursors - one for the fast tagged-book search,
+  // one for the raw DOCUMENT scan - so a search can draw from both across
+  // successive "load more" calls without either resetting the other.
+  const cursorRef = useRef({ tagOffset: 0, rawOffset: 0, tagExhausted: false, rawExhausted: false });
 
   const displayResults = typeFilter === 'all'
     ? allResults
@@ -87,25 +94,43 @@ export function BrowsePage() {
   const pageResults = sortedResults.slice(page * GROUP_SIZE, page * GROUP_SIZE + GROUP_SIZE);
   const canGoNext = page < totalPages - 1 || hasMore;
 
-  const doSearch = useCallback(async (query: string, replace: boolean, startOffset: number, target: number) => {
+  const doSearch = useCallback(async (query: string, replace: boolean, target: number) => {
     if (replace) setLoading(true); else setLoadingMore(true);
+    if (replace) cursorRef.current = { tagOffset: 0, rawOffset: 0, tagExhausted: false, rawExhausted: false };
 
-    let rawOffset = startOffset;
-    let scanned = 0;
-    let exhausted = false;
+    const cursor = cursorRef.current;
     const collected: QdnResource[] = [];
 
-    while (collected.length < target && scanned < MAX_RAW_SCAN) {
+    // Fast path: pull from the tagged-book cursor first.
+    if (!cursor.tagExhausted) {
+      const need = target - collected.length;
+      const res = await searchResources({
+        service:  'DOCUMENT',
+        keywords: [BOOK_TAG],
+        query:    query || undefined,
+        limit:    need,
+        offset:   cursor.tagOffset,
+      });
+      cursor.tagOffset += res.length;
+      collected.push(...res.filter(isReadable));
+      if (res.length < need) cursor.tagExhausted = true;
+    }
+
+    // Fallback: books published without the tag (older uploads, other
+    // tools) still need a raw DOCUMENT scan filtered client-side by type.
+    // Tagged resources are excluded here since the fast path already found them.
+    let scanned = 0;
+    while (collected.length < target && !cursor.rawExhausted && scanned < MAX_RAW_SCAN) {
       const res = await searchResources({
         service: 'DOCUMENT',
         query:   query || undefined,
         limit:   RAW_BATCH,
-        offset:  rawOffset,
+        offset:  cursor.rawOffset,
       });
-      rawOffset += res.length;
+      cursor.rawOffset += res.length;
       scanned += res.length;
-      collected.push(...res.filter(isReadable));
-      if (res.length < RAW_BATCH) { exhausted = true; break; }
+      collected.push(...res.filter(r => isReadable(r) && !r.tags?.includes(BOOK_TAG)));
+      if (res.length < RAW_BATCH) { cursor.rawExhausted = true; break; }
     }
 
     if (replace) {
@@ -117,28 +142,26 @@ export function BrowsePage() {
         return [...prev, ...fresh];
       });
     }
-    setOffset(rawOffset);
-    setHasMore(!exhausted);
+    setHasMore(!cursor.tagExhausted || !cursor.rawExhausted);
     if (replace) setLoading(false); else setLoadingMore(false);
   }, []);
 
   useEffect(() => {
     if (didInit.current) return;
     didInit.current = true;
-    void doSearch('', true, 0, INITIAL_LOAD);
+    void doSearch('', true, INITIAL_LOAD);
   }, [doSearch]);
 
   function handleSearch() {
     setActiveQuery(queryInput);
-    setOffset(0);
     setPage(0);
-    void doSearch(queryInput, true, 0, INITIAL_LOAD);
+    void doSearch(queryInput, true, INITIAL_LOAD);
   }
 
   async function goToPage(target: number) {
     if (target === page || target < 0) return;
     if (target >= totalPages && hasMore) {
-      await doSearch(activeQuery, false, offset, GROUP_SIZE);
+      await doSearch(activeQuery, false, GROUP_SIZE);
     }
     setPage(target);
   }
