@@ -41,6 +41,37 @@ function titleFromFilename(name: string): string {
   return name.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' ').trim();
 }
 
+// QDN identifiers are capped at 64 bytes (UTF-8) at the transaction level, but
+// that limit is only enforced when the signed transaction is later decoded
+// (e.g. on broadcast) - not when it's first built. Publishing raw filenames
+// as identifiers therefore appears to succeed and only fails afterwards with
+// an opaque "could not transform JSON into transaction" error. The identifier
+// only needs to be a unique key, not the display name (that's `title`), so
+// slugify and truncate it and rely on a short random suffix for uniqueness.
+const MAX_IDENTIFIER_BYTES = 64;
+const COMBINING_MARKS = /[\u0300-\u036f]/g;
+
+function utf8Length(s: string): number {
+  return new TextEncoder().encode(s).length;
+}
+
+function toIdentifier(filename: string, uid: string): string {
+  const dot = filename.lastIndexOf('.');
+  const ext = dot > 0 ? filename.slice(dot) : '';
+  const base = (dot > 0 ? filename.slice(0, dot) : filename)
+    .normalize('NFKD').replace(COMBINING_MARKS, '')
+    .replace(/[^a-zA-Z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .toLowerCase() || 'book';
+
+  const suffix = `-${uid}`;
+  const budget = MAX_IDENTIFIER_BYTES - utf8Length(ext) - utf8Length(suffix);
+  let truncated = base;
+  while (utf8Length(truncated) > budget) truncated = truncated.slice(0, -1);
+
+  return `${truncated}${suffix}${ext}`;
+}
+
 function FileTypeIcon({ type }: { type: FileType }) {
   const sx = { fontSize: '1.1rem', color: 'inherit' };
   switch (type) {
@@ -126,7 +157,7 @@ export function PublishPage() {
         pending.map(async b => ({
           service:     'DOCUMENT',
           name:        account.name as string,
-          identifier:  b.file.name,
+          identifier:  toIdentifier(b.file.name, b.id.slice(0, 8)),
           data64:      await fileToBase64(b.file),
           filename:    b.file.name,
           title:       b.title.trim() || undefined,
