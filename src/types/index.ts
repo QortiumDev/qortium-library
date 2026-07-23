@@ -1,3 +1,5 @@
+import { decodeDescription } from '../lib/qlibMarker';
+
 export enum EnumTheme {
   DARK = 'dark',
   LIGHT = 'light',
@@ -78,6 +80,8 @@ export function getResourceFileType(resource: QdnResource): FileType {
 }
 
 export function getResourceTitle(resource: QdnResource): string {
+  const { marker } = decodeDescription(resource.metadata?.description || resource.description);
+  if (marker?.title) return marker.title;
   return resource.metadata?.title || resource.title || resource.identifier;
 }
 
