@@ -2,30 +2,14 @@ import { useState, type MouseEvent } from 'react';
 import { Box, Button, CircularProgress, IconButton, Tooltip, Typography } from '@mui/material';
 import BookmarkIcon from '@mui/icons-material/Bookmark';
 import BookmarkBorderIcon from '@mui/icons-material/BookmarkBorder';
-import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
-import MenuBookIcon from '@mui/icons-material/MenuBook';
-import ArticleIcon from '@mui/icons-material/Article';
-import AutoStoriesIcon from '@mui/icons-material/AutoStories';
-import DescriptionIcon from '@mui/icons-material/Description';
 import DownloadIcon from '@mui/icons-material/Download';
 import { useNavigate } from 'react-router-dom';
 import { useColors } from '../../theme/ColorTokensContext';
 import { tokens } from '../../theme/tokens';
-import { type QdnResource, type FileType, getResourceFileType, getResourceTitle, formatBytes } from '../../types';
+import { type QdnResource, getResourceFileType, getResourceTitle, formatBytes } from '../../types';
 import { useBookmarks } from '../../hooks/useBookmarks';
 import { openDocumentViewer, saveQdnResource, ensureAccountUnlocked } from '../../api/qortal';
-import { TypeBadge, getTypeCoverGradient } from './TypeBadge';
-
-function fileIcon(type: FileType) {
-  const sx = { fontSize: '2.8rem', color: 'rgba(255,255,255,0.35)' };
-  switch (type) {
-    case 'pdf':  return <PictureAsPdfIcon sx={sx} />;
-    case 'epub': return <MenuBookIcon     sx={sx} />;
-    case 'txt':  return <ArticleIcon      sx={sx} />;
-    case 'cbz':  return <AutoStoriesIcon  sx={sx} />;
-    default:     return <DescriptionIcon  sx={sx} />;
-  }
-}
+import { TypeBadge, getTypeCoverGradient, fileIcon } from './TypeBadge';
 
 export function BookCard({ resource }: { resource: QdnResource }) {
   const c        = useColors();
