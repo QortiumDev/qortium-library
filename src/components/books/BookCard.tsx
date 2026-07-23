@@ -27,6 +27,10 @@ export function BookCard({ resource }: { resource: QdnResource }) {
 
   const gradient = getTypeCoverGradient(fileType, c.accent, c.accentHover);
 
+  function handleCardClick() {
+    navigate(`/book/${encodeURIComponent(resource.name)}/${encodeURIComponent(resource.identifier)}`);
+  }
+
   async function handleOpen(e: MouseEvent) {
     e.stopPropagation();
     setOpening(true);
@@ -85,7 +89,7 @@ export function BookCard({ resource }: { resource: QdnResource }) {
         boxShadow: hovered ? `0 8px 24px rgba(0,0,0,0.12)` : 'none',
         transition: '0.2s ease',
       }}
-      onClick={handleOpen}
+      onClick={handleCardClick}
     >
       {/* Cover */}
       <Box sx={{ position: 'relative', aspectRatio: '2/3', background: gradient, overflow: 'hidden' }}>
