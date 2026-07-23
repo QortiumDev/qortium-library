@@ -21,6 +21,11 @@ import { getFileType, type FileType } from '../types';
 import { accountAtom } from '../state/atoms';
 import { fileToBase64, publishMultipleResources, ensureAccountUnlocked } from '../api/qortal';
 import { TypeBadge } from '../components/books/TypeBadge';
+import { toIdentifier } from '../lib/identifier';
+import { toSafeTitle, utf8Length } from '../lib/bytes';
+import { encodeDescription, freeTextBudget, MarkerTooLargeError, type QlibMarker } from '../lib/qlibMarker';
+import { GENRES, MAX_GENRES_PER_BOOK } from '../lib/genres';
+import { seriesSlug, buildTags } from '../lib/tags';
 
 const ACCEPTED = ['.pdf', '.epub', '.txt', '.cbz'];
 const ACCEPT_ATTR = ACCEPTED.join(',');
@@ -33,6 +38,10 @@ interface PendingBook {
   fileType:    FileType;
   title:       string;
   description: string;
+  genres:      string[]; // genre slugs, max MAX_GENRES_PER_BOOK
+  seriesName:  string;   // '' means "not part of a series"
+  seriesPos:   string;   // numeric text input state
+  seriesOf:    string;   // optional numeric text input state
   status:      UploadStatus;
   errorMsg?:   string;
 }
@@ -41,35 +50,22 @@ function titleFromFilename(name: string): string {
   return name.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' ').trim();
 }
 
-// QDN identifiers are capped at 64 bytes (UTF-8) at the transaction level, but
-// that limit is only enforced when the signed transaction is later decoded
-// (e.g. on broadcast) - not when it's first built. Publishing raw filenames
-// as identifiers therefore appears to succeed and only fails afterwards with
-// an opaque "could not transform JSON into transaction" error. The identifier
-// only needs to be a unique key, not the display name (that's `title`), so
-// slugify and truncate it and rely on a short random suffix for uniqueness.
-const MAX_IDENTIFIER_BYTES = 64;
-const COMBINING_MARKS = /[\u0300-\u036f]/g;
-
-function utf8Length(s: string): number {
-  return new TextEncoder().encode(s).length;
-}
-
-function toIdentifier(filename: string, uid: string): string {
-  const dot = filename.lastIndexOf('.');
-  const ext = dot > 0 ? filename.slice(dot) : '';
-  const base = (dot > 0 ? filename.slice(0, dot) : filename)
-    .normalize('NFKD').replace(COMBINING_MARKS, '')
-    .replace(/[^a-zA-Z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .toLowerCase() || 'book';
-
-  const suffix = `-${uid}`;
-  const budget = MAX_IDENTIFIER_BYTES - utf8Length(ext) - utf8Length(suffix);
-  let truncated = base;
-  while (utf8Length(truncated) > budget) truncated = truncated.slice(0, -1);
-
-  return `${truncated}${suffix}${ext}`;
+// Single source of truth for turning a PendingBook's form state into the
+// marker that gets embedded in the description - shared by validateBook
+// (so oversized/malformed markers are caught before publish starts) and
+// handlePublishAll (so the actually-published marker never drifts from
+// what was validated).
+function buildMarker(b: PendingBook, slug: string | null): QlibMarker {
+  return {
+    title: b.title.trim(),
+    ...(b.genres.length ? { genres: [...new Set(b.genres)] } : {}),
+    ...(slug ? {
+      series:      slug,
+      seriesTitle: b.seriesName.trim(),
+      pos:         Number(b.seriesPos),
+      ...(b.seriesOf.trim() ? { of: Number(b.seriesOf) } : {}),
+    } : {}),
+  };
 }
 
 function FileTypeIcon({ type }: { type: FileType }) {
@@ -116,6 +112,10 @@ export function PublishPage() {
         fileType:    getFileType(f.name),
         title:       titleFromFilename(f.name),
         description: '',
+        genres:      [] as string[],
+        seriesName:  '',
+        seriesPos:   '',
+        seriesOf:    '',
         status:      'pending' as UploadStatus,
       })),
     ]);
@@ -144,26 +144,69 @@ export function PublishPage() {
     setBooks(prev => prev.filter(b => b.id !== id));
   }
 
+  function validateBook(b: PendingBook): string | null {
+    if (!b.title.trim()) return 'Title is required';
+    if (b.genres.length > MAX_GENRES_PER_BOOK) return `Choose at most ${MAX_GENRES_PER_BOOK} genres`;
+
+    let slug: string | null = null;
+    if (b.seriesName.trim()) {
+      slug = seriesSlug(b.seriesName);
+      if (!slug) {
+        return 'Series name is too unusual to tag - try something with more letters or numbers';
+      }
+      const pos = Number(b.seriesPos);
+      if (!Number.isInteger(pos) || pos <= 0) {
+        return 'Series position must be a whole number greater than 0';
+      }
+      if (b.seriesOf.trim()) {
+        const of = Number(b.seriesOf);
+        if (!Number.isInteger(of) || of <= 0) {
+          return 'Series total must be a whole number greater than 0';
+        }
+      }
+    }
+
+    if (freeTextBudget(buildMarker(b, slug)) < 0) {
+      return 'Title/series/genre info is too long to fit - try a shorter title or series name';
+    }
+
+    return null;
+  }
+
   async function handlePublishAll() {
     if (!account?.name || books.length === 0) return;
-    setPublishing(true);
 
     const pending = books.filter(b => b.status === 'pending');
+    const errors = new Map(pending.map(b => [b.id, validateBook(b)]));
+    if ([...errors.values()].some(err => err !== null)) {
+      setBooks(prev => prev.map(b => {
+        const err = errors.get(b.id);
+        return err ? { ...b, status: 'error', errorMsg: err } : b;
+      }));
+      return;
+    }
+
+    setPublishing(true);
     setBooks(prev => prev.map(b => b.status === 'pending' ? { ...b, status: 'publishing' } : b));
 
     try {
       if (!await ensureAccountUnlocked()) return;
       const resources = await Promise.all(
-        pending.map(async b => ({
-          service:     'DOCUMENT',
-          name:        account.name as string,
-          identifier:  toIdentifier(b.file.name, b.id.slice(0, 8)),
-          data64:      await fileToBase64(b.file),
-          filename:    b.file.name,
-          title:       b.title.trim() || undefined,
-          description: b.description.trim() || undefined,
-          tags:        ['qlib-book'],
-        }))
+        pending.map(async b => {
+          const slug = b.seriesName.trim() ? seriesSlug(b.seriesName) : null;
+          const marker = buildMarker(b, slug);
+
+          return {
+            service:     'DOCUMENT',
+            name:        account.name as string,
+            identifier:  await toIdentifier(b.file.name),
+            data64:      await fileToBase64(b.file),
+            filename:    b.file.name,
+            title:       toSafeTitle(b.title.trim()),
+            description: encodeDescription(b.description.trim(), marker),
+            tags:        buildTags(b.genres, slug),
+          };
+        })
       );
 
       await publishMultipleResources(resources);
@@ -172,7 +215,9 @@ export function PublishPage() {
         b.status === 'publishing' ? { ...b, status: 'done' } : b
       ));
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Publish failed';
+      const msg = err instanceof MarkerTooLargeError
+        ? err.message
+        : err instanceof Error ? err.message : 'Publish failed';
       setBooks(prev => prev.map(b =>
         b.status === 'publishing' ? { ...b, status: 'error', errorMsg: msg } : b
       ));
@@ -183,6 +228,7 @@ export function PublishPage() {
 
   const pendingCount = books.filter(b => b.status === 'pending').length;
   const doneCount    = books.filter(b => b.status === 'done').length;
+  const errorCount   = books.filter(b => b.status === 'error').length;
   const noName       = account !== null && !account.name;
 
   return (
@@ -295,7 +341,7 @@ export function PublishPage() {
                 </Typography>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexShrink: 0 }}>
                   {statusIcon(book.status, c)}
-                  {book.status === 'pending' && (
+                  {(book.status === 'pending' || book.status === 'error') && (
                     <Tooltip title="Remove">
                       <IconButton
                         size="small"
@@ -386,7 +432,7 @@ export function PublishPage() {
             </Button>
           )}
 
-          {doneCount > 0 && pendingCount === 0 && (
+          {(doneCount > 0 || errorCount > 0) && pendingCount === 0 && (
             <Button
               variant="text"
               onClick={() => setBooks([])}
