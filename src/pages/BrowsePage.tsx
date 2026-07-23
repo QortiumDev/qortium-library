@@ -11,6 +11,7 @@ import { useColors } from '../theme/ColorTokensContext';
 import { tokens } from '../theme/tokens';
 import { type QdnResource, type FileType, getResourceFileType } from '../types';
 import { searchResources } from '../api/qortal';
+import { QLIB_PREFIX } from '../lib/identifier';
 import { BookGrid } from '../components/books/BookGrid';
 import { EmptyState } from '../components/shared/EmptyState';
 
@@ -27,9 +28,9 @@ const RAW_BATCH = 200;
 // Safety cap on how many raw resources a single load will scan through
 // looking for books, so a page with very few real books doesn't spin forever.
 const MAX_RAW_SCAN = 3000;
-// Resources this app published carry this tag (see PublishPage), so a
-// keyword-scoped search returns almost entirely valid books without the
-// DOCUMENT-service noise - no raw-batch scanning needed for that portion.
+// Books published before the identifier scheme changed still carry this tag
+// (see PublishPage) - kept as a fast-path search alongside the identifier
+// prefix below so old content keeps working without a raw-batch scan.
 const BOOK_TAG = 'qlib-book';
 
 function getPageWindow(current: number, total: number): (number | 'ellipsis')[] {
@@ -77,10 +78,11 @@ export function BrowsePage() {
   const [hasMore,      setHasMore]      = useState(false);
   const [page,         setPage]         = useState(0);
   const didInit = useRef(false);
-  // Two independent pagination cursors - one for the fast tagged-book search,
-  // one for the raw DOCUMENT scan - so a search can draw from both across
-  // successive "load more" calls without either resetting the other.
-  const cursorRef = useRef({ tagOffset: 0, rawOffset: 0, tagExhausted: false, rawExhausted: false });
+  // Three independent pagination cursors - one for the fast tagged-book
+  // search, one for the fast identifier-prefix search, one for the raw
+  // DOCUMENT scan - so a search can draw from all three across successive
+  // "load more" calls without any of them resetting the others.
+  const cursorRef = useRef({ tagOffset: 0, idOffset: 0, rawOffset: 0, tagExhausted: false, idExhausted: false, rawExhausted: false });
 
   const displayResults = typeFilter === 'all'
     ? allResults
@@ -96,7 +98,7 @@ export function BrowsePage() {
 
   const doSearch = useCallback(async (query: string, replace: boolean, target: number) => {
     if (replace) setLoading(true); else setLoadingMore(true);
-    if (replace) cursorRef.current = { tagOffset: 0, rawOffset: 0, tagExhausted: false, rawExhausted: false };
+    if (replace) cursorRef.current = { tagOffset: 0, idOffset: 0, rawOffset: 0, tagExhausted: false, idExhausted: false, rawExhausted: false };
 
     const cursor = cursorRef.current;
     const collected: QdnResource[] = [];
@@ -116,9 +118,30 @@ export function BrowsePage() {
       if (res.length < need) cursor.tagExhausted = true;
     }
 
+    // Fast path 2: books published under the newer qlib- identifier prefix
+    // (see src/lib/identifier.ts) - these don't carry BOOK_TAG, so they'd
+    // otherwise only be found by the slow raw scan below.
+    if (!cursor.idExhausted) {
+      const need = target - collected.length;
+      if (need > 0) {
+        const res = await searchResources({
+          service:    'DOCUMENT',
+          identifier: QLIB_PREFIX,
+          prefixOnly: true,
+          query:      query || undefined,
+          limit:      need,
+          offset:     cursor.idOffset,
+        });
+        cursor.idOffset += res.length;
+        collected.push(...res.filter(isReadable));
+        if (res.length < need) cursor.idExhausted = true;
+      }
+    }
+
     // Fallback: books published without the tag (older uploads, other
     // tools) still need a raw DOCUMENT scan filtered client-side by type.
-    // Tagged resources are excluded here since the fast path already found them.
+    // Tagged resources and identifier-prefixed resources are excluded here
+    // since the fast paths already found them.
     let scanned = 0;
     while (collected.length < target && !cursor.rawExhausted && scanned < MAX_RAW_SCAN) {
       const res = await searchResources({
@@ -129,7 +152,7 @@ export function BrowsePage() {
       });
       cursor.rawOffset += res.length;
       scanned += res.length;
-      collected.push(...res.filter(r => isReadable(r) && !r.tags?.includes(BOOK_TAG)));
+      collected.push(...res.filter(r => isReadable(r) && !r.tags?.includes(BOOK_TAG) && !r.identifier.startsWith(QLIB_PREFIX)));
       if (res.length < RAW_BATCH) { cursor.rawExhausted = true; break; }
     }
 
@@ -142,7 +165,7 @@ export function BrowsePage() {
         return [...prev, ...fresh];
       });
     }
-    setHasMore(!cursor.tagExhausted || !cursor.rawExhausted);
+    setHasMore(!cursor.tagExhausted || !cursor.idExhausted || !cursor.rawExhausted);
     if (replace) setLoading(false); else setLoadingMore(false);
   }, []);
 

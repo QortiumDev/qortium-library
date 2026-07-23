@@ -6,7 +6,7 @@ import { truncateToUtf8Bytes } from './bytes';
 // a duplicate. The "qlib-" prefix doubles as a discovery marker: Browse can
 // find every book this app published with a single identifier-prefix search
 // instead of scanning the whole DOCUMENT service or relying on a tag.
-const QLIB_PREFIX = 'qlib-';
+export const QLIB_PREFIX = 'qlib-';
 const HASH_HEX_CHARS = 12; // 48 bits - collisions only matter within one publisher's own catalog
 
 // Caps the extension so the 64-byte identifier bound holds unconditionally,
