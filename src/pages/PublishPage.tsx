@@ -3,6 +3,7 @@ import {
   Box, Button, CircularProgress, IconButton,
   TextField, Tooltip, Typography,
 } from '@mui/material';
+import Autocomplete from '@mui/material/Autocomplete';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ErrorIcon from '@mui/icons-material/Error';
@@ -393,9 +394,15 @@ export function PublishPage() {
                   <TextField
                     size="small"
                     fullWidth
+                    multiline
                     label="Description (optional)"
                     value={book.description}
                     onChange={e => updateBook(book.id, { description: e.target.value })}
+                    helperText={(() => {
+                      const slug = book.seriesName.trim() ? seriesSlug(book.seriesName) : null;
+                      const budget = freeTextBudget(buildMarker(book, slug));
+                      return `${utf8Length(book.description)} / ${budget} bytes`;
+                    })()}
                     sx={{
                       '& .MuiOutlinedInput-root': {
                         fontSize: '0.8rem',
@@ -406,6 +413,96 @@ export function PublishPage() {
                       '& .MuiInputLabel-root': { fontSize: '0.78rem' },
                     }}
                   />
+
+                  <Autocomplete
+                    multiple
+                    size="small"
+                    options={GENRES}
+                    getOptionLabel={g => g.label}
+                    isOptionEqualToValue={(a, b) => a.slug === b.slug}
+                    value={GENRES.filter(g => book.genres.includes(g.slug))}
+                    onChange={(_, selected) => {
+                      if (selected.length > MAX_GENRES_PER_BOOK) return;
+                      updateBook(book.id, { genres: selected.map(g => g.slug) });
+                    }}
+                    getOptionDisabled={g =>
+                      book.genres.length >= MAX_GENRES_PER_BOOK && !book.genres.includes(g.slug)
+                    }
+                    renderInput={params => (
+                      <TextField
+                        {...params}
+                        label={`Genres (${book.genres.length}/${MAX_GENRES_PER_BOOK})`}
+                        sx={{
+                          '& .MuiOutlinedInput-root': {
+                            fontSize: '0.8rem',
+                            '& fieldset': { borderColor: c.borderLight },
+                            '&:hover fieldset': { borderColor: c.accent },
+                            '&.Mui-focused fieldset': { borderColor: c.accent },
+                          },
+                          '& .MuiInputLabel-root': { fontSize: '0.78rem' },
+                        }}
+                      />
+                    )}
+                  />
+
+                  <TextField
+                    size="small"
+                    fullWidth
+                    label="Part of a series? (optional)"
+                    value={book.seriesName}
+                    onChange={e => {
+                      const v = e.target.value;
+                      updateBook(book.id, v.trim() ? { seriesName: v } : { seriesName: v, seriesPos: '', seriesOf: '' });
+                    }}
+                    sx={{
+                      '& .MuiOutlinedInput-root': {
+                        fontSize: '0.8rem',
+                        '& fieldset': { borderColor: c.borderLight },
+                        '&:hover fieldset': { borderColor: c.accent },
+                        '&.Mui-focused fieldset': { borderColor: c.accent },
+                      },
+                      '& .MuiInputLabel-root': { fontSize: '0.78rem' },
+                    }}
+                  />
+
+                  {book.seriesName.trim() && (
+                    <Box sx={{ display: 'flex', gap: 1 }}>
+                      <TextField
+                        size="small"
+                        type="number"
+                        label="Position"
+                        value={book.seriesPos}
+                        onChange={e => updateBook(book.id, { seriesPos: e.target.value })}
+                        sx={{
+                          flex: 1,
+                          '& .MuiOutlinedInput-root': {
+                            fontSize: '0.8rem',
+                            '& fieldset': { borderColor: c.borderLight },
+                            '&:hover fieldset': { borderColor: c.accent },
+                            '&.Mui-focused fieldset': { borderColor: c.accent },
+                          },
+                          '& .MuiInputLabel-root': { fontSize: '0.78rem' },
+                        }}
+                      />
+                      <TextField
+                        size="small"
+                        type="number"
+                        label="Of (optional)"
+                        value={book.seriesOf}
+                        onChange={e => updateBook(book.id, { seriesOf: e.target.value })}
+                        sx={{
+                          flex: 1,
+                          '& .MuiOutlinedInput-root': {
+                            fontSize: '0.8rem',
+                            '& fieldset': { borderColor: c.borderLight },
+                            '&:hover fieldset': { borderColor: c.accent },
+                            '&.Mui-focused fieldset': { borderColor: c.accent },
+                          },
+                          '& .MuiInputLabel-root': { fontSize: '0.78rem' },
+                        }}
+                      />
+                    </Box>
+                  )}
                 </Box>
               )}
             </Box>
