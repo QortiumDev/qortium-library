@@ -167,8 +167,12 @@ export function PublishPage() {
       }
     }
 
-    if (freeTextBudget(buildMarker(b, slug)) < 0) {
+    const budget = freeTextBudget(buildMarker(b, slug));
+    if (budget < 0) {
       return 'Title/series/genre info is too long to fit - try a shorter title or series name';
+    }
+    if (utf8Length(b.description.trim()) > budget) {
+      return 'Description is too long to fit - shorten it, or shorten the title/series name to leave more room';
     }
 
     return null;
